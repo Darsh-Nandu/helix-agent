@@ -1,0 +1,7 @@
+# No MSVC linker on this machine. Build with the GNU host toolchain
+# (rust-toolchain.toml) and use Rust's bundled self-contained mingw CRT +
+# libs for linking, so we don't mix the external C:\gcc CRT (which has no
+# separate libgcc_eh.a) with Rust's bundled libs.
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+rustflags = ["-C", "link-self-contained=y"]

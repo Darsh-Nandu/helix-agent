@@ -1,0 +1,15 @@
+[package]
+name = "helix-agent"
+version = "0.1.0"
+edition = "2021"
+description = "A simple AI agent with long-term memory backed by HelixDB (graph + vector)"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "io-std"] }
+# native-tls -> Windows SChannel, so we avoid the aws-lc-rs/rustls C build
+# that does not play well with this mingw setup. Only the Anthropic API
+# needs TLS; the local HelixDB instance is plain HTTP on localhost.
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+anyhow = "1"

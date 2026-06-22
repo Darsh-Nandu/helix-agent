@@ -1,0 +1,4 @@
+# This machine has no MSVC linker; build scripts and proc-macros compile
+# for the host, so the host toolchain itself must be GNU (mingw-w64).
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"
