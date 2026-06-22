@@ -13,3 +13,4 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "io
 # needs TLS; the local HelixDB instance is plain HTTP on localhost.
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 anyhow = "1"
+dotenvy = "0.15"

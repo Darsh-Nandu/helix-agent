@@ -24,6 +24,9 @@ use llm::Llm;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load GROQ_API_KEY etc. from a local .env if present (ignored if absent).
+    let _ = dotenvy::dotenv();
+
     let base_url = std::env::var("HELIX_URL").unwrap_or_else(|_| "http://localhost:6969".into());
     let db = HelixClient::new(&base_url);
     let llm = Llm::from_env();

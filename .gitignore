@@ -4,3 +4,6 @@ target/
 
 # Rust
 target/
+
+# Secrets — never commit the Groq key
+.env
