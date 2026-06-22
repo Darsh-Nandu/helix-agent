@@ -37,6 +37,31 @@ So the same `Memory` nodes carry **both** a vector embedding (for semantic
 recall) and `NEXT` edges (for ordered conversation threads) — graph and vector
 in one store, which is HelixDB's whole pitch.
 
+## How I built this
+
+The interesting part was getting the query AST right without guessing. HelixDB
+v3 doesn't take a query string — `POST /v1/query` wants a JSON AST (the
+`{ "AddN": {...} }`, `{ "VectorSearchNodes": {...} }` shapes you see in
+`src/db.rs`). Hand-writing those by trial-and-error would be fragile.
+
+Instead I used HelixDB's **official TypeScript DSL as a compiler**. The
+`@helix-db/helix-db` npm package builds the exact same AST as the Rust SDK and
+exposes a `.toDynamicJson(params, args)` method that prints the full request
+body. So [`scripts/gen_queries.mjs`](scripts/gen_queries.mjs) writes each query
+in the readable DSL —
+
+```js
+writeBatch().varAs("m",
+  g().addN("Memory", { role: p.role, text: p.text, embedding: p.embedding })
+).returning(["m"]).toDynamicJson(...)
+```
+
+— runs it once under Node, and prints the ground-truth JSON. I validated each
+shape against the live instance with `helix query dev --file`, then transcribed
+the confirmed AST into the Rust client as `serde_json::json!` templates. The
+Rust side stays dependency-light (no `helix-db` crate, just `reqwest`), but the
+query shapes are exactly what the database expects — generated, not guessed.
+
 Embeddings are a dependency-free hashing embedder (`src/embed.rs`) — good enough
 to demonstrate semantic recall without an embedding API. Swap it for a real one
 to improve quality; the HelixDB plumbing is unchanged.
