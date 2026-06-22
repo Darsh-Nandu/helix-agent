@@ -31,8 +31,9 @@ async fn main() -> Result<()> {
     let db = HelixClient::new(&base_url);
     let llm = Llm::from_env();
 
-    // The vector index must exist before any search; idempotent.
+    // Indexes must exist before search / entity dedup; both idempotent.
     db.ensure_vector_index().await?;
+    db.ensure_entity_index().await?;
 
     let online = llm.online();
     let model = llm.model().to_string();
@@ -62,9 +63,21 @@ async fn main() -> Result<()> {
                 println!("  {}. ({role}) {one_line}", i + 1);
             }
         }
+        Some("facts") => {
+            let name = args.collect::<Vec<_>>().join(" ");
+            let name = if name.trim().is_empty() { "user".to_string() } else { name };
+            let facts = agent.facts(&name).await?;
+            println!("knowledge-graph facts about '{name}':");
+            if facts.is_empty() {
+                println!("  (none yet — chat or seed first, with GROQ_API_KEY set)");
+            }
+            for f in &facts {
+                println!("  {name} --{}--> {}", f.predicate, f.object);
+            }
+        }
         Some(other) => {
             eprintln!(
-                "unknown command '{other}'. try: seed | ask \"...\" | thread [id] | (no args for chat)"
+                "unknown command '{other}'. try: seed | ask \"...\" | thread [id] | facts [name] | (no args for chat)"
             );
         }
         None => repl(&mut agent, online, &model, &base_url).await?,

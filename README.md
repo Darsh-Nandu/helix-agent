@@ -31,11 +31,21 @@ see [`scripts/gen_queries.mjs`](scripts/gen_queries.mjs). The operations used:
 | Recall | `VectorSearchNodes("Memory", "embedding", q, k)` → `$distance` |
 | Chain turns (graph) | `n(from).addE("NEXT", to)` linking each turn to the next |
 | Walk a thread (graph) | `n(id).out("NEXT")` to follow the conversation chain |
+| Dedupe entities | unique-equality index on `Entity.name` |
+| Store a fact (KG) | `Entity --HAS--> Statement{predicate, object} --ABOUT--> Entity` |
+| Read facts (KG) | `nWithLabel("Entity").where(name==?).out("HAS").valueMap(...)` |
 | Recent / count | `nWithLabel("Memory").orderBy(ts).limit(k)` / `.count()` |
 
-So the same `Memory` nodes carry **both** a vector embedding (for semantic
-recall) and `NEXT` edges (for ordered conversation threads) — graph and vector
-in one store, which is HelixDB's whole pitch.
+So one HelixDB instance holds **three views of memory at once**:
+
+- **vectors** on `Memory` nodes → semantic recall,
+- **`NEXT` edges** between memories → ordered conversation threads,
+- a **knowledge graph** → the LLM distils each message into
+  `(subject, predicate, object)` triples, stored as `Entity` and `Statement`
+  nodes connected by edges (`user --OWNS--> a cat named tuna`).
+
+That's the whole point: the kind of memory that used to mean juggling a vector
+DB *and* a separate graph DB *and* sync glue is one store here.
 
 ## How I built this
 
@@ -86,6 +96,7 @@ cargo run                 # interactive chat
 cargo run -- seed         # insert a few example memories
 cargo run -- ask "what language do I like?"
 cargo run -- thread 0     # walk the NEXT-edge conversation chain from memory #0
+cargo run -- facts user   # print knowledge-graph facts about an entity (needs GROQ key)
 ```
 
 Config via env: `HELIX_URL` (default `http://localhost:6969`),

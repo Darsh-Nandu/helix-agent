@@ -98,6 +98,89 @@ impl Llm {
     }
 }
 
+/// A `(subject, predicate, object)` knowledge-graph triple.
+#[derive(Debug)]
+pub struct Triple {
+    pub subject: String,
+    pub predicate: String,
+    pub object: String,
+}
+
+impl Llm {
+    /// Extract knowledge-graph triples from a user message via the LLM. Returns
+    /// an empty vec offline or if nothing parses (never fails the turn).
+    pub async fn extract_triples(&self, text: &str) -> Vec<Triple> {
+        let Some(key) = &self.api_key else {
+            return Vec::new();
+        };
+
+        let system = "Extract factual (subject, predicate, object) triples from the user's message. \
+            Subject and object are short noun phrases; predicate is a verb phrase in UPPER_SNAKE_CASE \
+            (e.g. OWNS, LIVES_IN, LIKES, WORKS_ON). Only extract concrete facts the user states about \
+            themselves or the world. Resolve 'I'/'my' to the literal subject 'user'. \
+            Respond with ONLY a JSON array like \
+            [{\"subject\":\"user\",\"predicate\":\"OWNS\",\"object\":\"a cat named tuna\"}]. \
+            If there are no clear facts, respond with [].";
+
+        let body = json!({
+            "model": self.model,
+            "max_tokens": 512,
+            "messages": [
+                { "role": "system", "content": system },
+                { "role": "user", "content": text },
+            ],
+        });
+
+        let resp = match self
+            .http
+            .post(API_URL)
+            .header("authorization", format!("Bearer {key}"))
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        let v: serde_json::Value = match resp.json().await {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        };
+        let content = v["choices"][0]["message"]["content"].as_str().unwrap_or("");
+        parse_triples(content)
+    }
+}
+
+/// Pull the JSON array out of a model reply (it may wrap it in prose/fences)
+/// and parse it into triples, normalizing case for stable entity dedup.
+fn parse_triples(content: &str) -> Vec<Triple> {
+    let (start, end) = match (content.find('['), content.rfind(']')) {
+        (Some(s), Some(e)) if e > s => (s, e),
+        _ => return Vec::new(),
+    };
+    let arr: serde_json::Value = match serde_json::from_str(&content[start..=end]) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    arr.as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|t| {
+                    let s = t["subject"].as_str()?.trim().to_lowercase();
+                    let p = t["predicate"].as_str()?.trim().to_uppercase().replace(' ', "_");
+                    let o = t["object"].as_str()?.trim().to_lowercase();
+                    if s.is_empty() || p.is_empty() || o.is_empty() {
+                        return None;
+                    }
+                    Some(Triple { subject: s, predicate: p, object: o })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Deterministic stand-in when no API key is set: it still exercises HelixDB by
 /// reporting what was recalled, so the memory loop is visible offline.
 fn offline_reply(user_msg: &str, recalled: &[MemoryHit]) -> String {

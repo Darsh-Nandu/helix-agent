@@ -37,6 +37,14 @@ pub struct MemoryRow {
     pub ts: String,
 }
 
+/// One fact in the knowledge graph: `<subject> <predicate> <object>`. The
+/// subject is whichever entity the fact was read from.
+#[derive(Debug, Deserialize)]
+pub struct Fact {
+    pub predicate: String,
+    pub object: String,
+}
+
 pub struct HelixClient {
     http: reqwest::Client,
     endpoint: String,
@@ -163,10 +171,10 @@ impl HelixClient {
         Ok(serde_json::from_value(rows).unwrap_or_default())
     }
 
-    /// Create a directed `NEXT` edge from one memory to the next, building a
-    /// conversation chain — this is the graph half of HelixDB working alongside
-    /// the vectors. `g().n(from).addE("NEXT", to)`.
-    pub async fn link_memories(&self, from_id: i64, to_id: i64) -> Result<()> {
+    /// Create a directed edge `from -[label]-> to`. The label is a literal in
+    /// the AST (not a param), so it's interpolated here. Used for `NEXT`
+    /// (conversation chain) and `HAS` (entity → statement).
+    pub async fn add_edge(&self, from_id: i64, to_id: i64, label: &str) -> Result<()> {
         let body = json!({
             "request_type": "write",
             "query_name": null,
@@ -175,7 +183,7 @@ impl HelixClient {
                     "name": "e",
                     "steps": [
                         { "N": { "Param": "from_id" } },
-                        { "AddE": { "label": "NEXT", "to": { "Param": "to_id" }, "properties": [] } }
+                        { "AddE": { "label": label, "to": { "Param": "to_id" }, "properties": [] } }
                     ],
                     "condition": null
                 }}],
@@ -185,6 +193,155 @@ impl HelixClient {
             "parameter_types": { "from_id": "I64", "to_id": "I64" }
         });
         self.send(body).await.map(|_| ())
+    }
+
+    /// Convenience: chain one memory to the next with a `NEXT` edge.
+    pub async fn link_memories(&self, from_id: i64, to_id: i64) -> Result<()> {
+        self.add_edge(from_id, to_id, "NEXT").await
+    }
+
+    // ---- Knowledge graph -------------------------------------------------
+
+    /// Ensure a unique-equality index on `Entity.name` so entities dedupe.
+    pub async fn ensure_entity_index(&self) -> Result<()> {
+        let body = json!({
+            "request_type": "write",
+            "query_name": null,
+            "query": {
+                "queries": [{ "Query": {
+                    "name": "ix",
+                    "steps": [{ "CreateIndex": {
+                        "spec": { "NodeEquality": { "label": "Entity", "property": "name", "unique": true } },
+                        "if_not_exists": true
+                    }}],
+                    "condition": null
+                }}],
+                "returns": ["ix"]
+            }
+        });
+        self.send(body).await.map(|_| ())
+    }
+
+    /// Find an existing `Entity` by name, returning its id if present.
+    async fn find_entity(&self, name: &str) -> Result<Option<i64>> {
+        let body = json!({
+            "request_type": "read",
+            "query_name": null,
+            "query": {
+                "queries": [{ "Query": {
+                    "name": "e",
+                    "steps": [
+                        { "NWhere": { "Eq": ["$label", { "String": "Entity" }] } },
+                        { "Where": { "EqExpr": ["name", { "Param": "name" }] } },
+                        { "Project": [{ "source": "$id", "alias": "id" }] }
+                    ],
+                    "condition": null
+                }}],
+                "returns": ["e"]
+            },
+            "parameters": { "name": name },
+            "parameter_types": { "name": "String" }
+        });
+        let resp = self.send(body).await?;
+        Ok(resp["e"]["properties"][0]["id"].as_i64())
+    }
+
+    async fn add_entity(&self, name: &str) -> Result<i64> {
+        let body = json!({
+            "request_type": "write",
+            "query_name": null,
+            "query": {
+                "queries": [{ "Query": {
+                    "name": "e",
+                    "steps": [
+                        { "AddN": { "label": "Entity", "properties": [["name", { "Expr": { "Param": "name" } }]] } },
+                        { "Project": [{ "source": "$id", "alias": "id" }] }
+                    ],
+                    "condition": null
+                }}],
+                "returns": ["e"]
+            },
+            "parameters": { "name": name },
+            "parameter_types": { "name": "String" }
+        });
+        let resp = self.send(body).await?;
+        resp["e"]["properties"][0]["id"]
+            .as_i64()
+            .ok_or_else(|| anyhow!("add_entity: missing id: {resp}"))
+    }
+
+    /// Find-or-create an entity, returning its id (dedupes on name).
+    pub async fn upsert_entity(&self, name: &str) -> Result<i64> {
+        match self.find_entity(name).await? {
+            Some(id) => Ok(id),
+            None => self.add_entity(name).await,
+        }
+    }
+
+    /// Add a reified `Statement` node `{ predicate, object }`, returning its id.
+    pub async fn add_statement(&self, predicate: &str, object: &str) -> Result<i64> {
+        let body = json!({
+            "request_type": "write",
+            "query_name": null,
+            "query": {
+                "queries": [{ "Query": {
+                    "name": "s",
+                    "steps": [
+                        { "AddN": { "label": "Statement", "properties": [
+                            ["predicate", { "Expr": { "Param": "predicate" } }],
+                            ["object", { "Expr": { "Param": "object" } }]
+                        ]}},
+                        { "Project": [{ "source": "$id", "alias": "id" }] }
+                    ],
+                    "condition": null
+                }}],
+                "returns": ["s"]
+            },
+            "parameters": { "predicate": predicate, "object": object },
+            "parameter_types": { "predicate": "String", "object": "String" }
+        });
+        let resp = self.send(body).await?;
+        resp["s"]["properties"][0]["id"]
+            .as_i64()
+            .ok_or_else(|| anyhow!("add_statement: missing id: {resp}"))
+    }
+
+    /// Record a `(subject, predicate, object)` triple as graph structure:
+    /// subject Entity --HAS--> Statement, and Statement --ABOUT--> object Entity
+    /// so the two entities are genuinely connected in the graph.
+    pub async fn add_fact(&self, subject: &str, predicate: &str, object: &str) -> Result<()> {
+        let subj_id = self.upsert_entity(subject).await?;
+        let obj_id = self.upsert_entity(object).await?;
+        let stmt_id = self.add_statement(predicate, object).await?;
+        self.add_edge(subj_id, stmt_id, "HAS").await?;
+        self.add_edge(stmt_id, obj_id, "ABOUT").await?;
+        Ok(())
+    }
+
+    /// Read all facts about an entity: `Entity(name) --HAS--> Statement`.
+    pub async fn facts_of(&self, name: &str) -> Result<Vec<Fact>> {
+        let body = json!({
+            "request_type": "read",
+            "query_name": null,
+            "query": {
+                "queries": [{ "Query": {
+                    "name": "f",
+                    "steps": [
+                        { "NWhere": { "Eq": ["$label", { "String": "Entity" }] } },
+                        { "Where": { "EqExpr": ["name", { "Param": "name" }] } },
+                        { "Out": "HAS" },
+                        { "ValueMap": ["predicate", "object"] }
+                    ],
+                    "condition": null
+                }}],
+                "returns": ["f"]
+            },
+            "parameters": { "name": name },
+            "parameter_types": { "name": "String" }
+        });
+        let resp = self.send(body).await?;
+        let rows = resp["f"]["properties"].clone();
+        Ok(serde_json::from_value(rows).unwrap_or_default())
     }
 
     /// Follow the `NEXT` edge(s) out of a memory: `g().n(id).out("NEXT")`.
