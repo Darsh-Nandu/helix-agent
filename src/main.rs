@@ -33,11 +33,11 @@ async fn main() -> Result<()> {
 
     let online = llm.online();
     let model = llm.model().to_string();
-    let agent = Agent::new(db, llm);
+    let mut agent = Agent::new(db, llm);
 
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
-        Some("seed") => seed(&agent).await?,
+        Some("seed") => seed(&mut agent).await?,
         Some("ask") => {
             let q = args.collect::<Vec<_>>().join(" ");
             if q.trim().is_empty() {
@@ -47,16 +47,30 @@ async fn main() -> Result<()> {
                 println!("{reply}");
             }
         }
-        Some(other) => {
-            eprintln!("unknown command '{other}'. try: seed | ask \"...\" | (no args for chat)");
+        Some("thread") => {
+            let start: i64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let chain = agent.thread(start).await?;
+            println!("conversation chain following NEXT edges from memory #{start}:");
+            if chain.is_empty() {
+                println!("  (no outgoing edges — seed or chat first)");
+            }
+            for (i, (role, text)) in chain.iter().enumerate() {
+                let one_line = text.replace('\n', " ");
+                println!("  {}. ({role}) {one_line}", i + 1);
+            }
         }
-        None => repl(&agent, online, &model, &base_url).await?,
+        Some(other) => {
+            eprintln!(
+                "unknown command '{other}'. try: seed | ask \"...\" | thread [id] | (no args for chat)"
+            );
+        }
+        None => repl(&mut agent, online, &model, &base_url).await?,
     }
     Ok(())
 }
 
 /// Interactive chat loop.
-async fn repl(agent: &Agent, online: bool, model: &str, base_url: &str) -> Result<()> {
+async fn repl(agent: &mut Agent, online: bool, model: &str, base_url: &str) -> Result<()> {
     let count = agent.db().count_memories().await.unwrap_or(0);
     println!("helix-agent — memory backed by HelixDB ({base_url})");
     println!(
@@ -94,7 +108,7 @@ async fn repl(agent: &Agent, online: bool, model: &str, base_url: &str) -> Resul
 }
 
 /// Insert a handful of example memories so vector recall has something to find.
-async fn seed(agent: &Agent) -> Result<()> {
+async fn seed(agent: &mut Agent) -> Result<()> {
     let samples = [
         "My favorite programming language is Rust.",
         "I'm building an AI agent to test HelixDB, a graph-vector database.",

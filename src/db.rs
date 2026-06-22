@@ -26,6 +26,17 @@ pub struct MemoryHit {
     pub ts: String,
 }
 
+/// A memory row from a graph traversal (`valueMap` exposes the id as `$id`).
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct MemoryRow {
+    #[serde(rename = "$id")]
+    pub id: i64,
+    pub role: String,
+    pub text: String,
+    pub ts: String,
+}
+
 pub struct HelixClient {
     http: reqwest::Client,
     endpoint: String,
@@ -149,6 +160,55 @@ impl HelixClient {
         });
         let resp = self.send(body).await?;
         let rows = resp["hits"]["properties"].clone();
+        Ok(serde_json::from_value(rows).unwrap_or_default())
+    }
+
+    /// Create a directed `NEXT` edge from one memory to the next, building a
+    /// conversation chain — this is the graph half of HelixDB working alongside
+    /// the vectors. `g().n(from).addE("NEXT", to)`.
+    pub async fn link_memories(&self, from_id: i64, to_id: i64) -> Result<()> {
+        let body = json!({
+            "request_type": "write",
+            "query_name": null,
+            "query": {
+                "queries": [{ "Query": {
+                    "name": "e",
+                    "steps": [
+                        { "N": { "Param": "from_id" } },
+                        { "AddE": { "label": "NEXT", "to": { "Param": "to_id" }, "properties": [] } }
+                    ],
+                    "condition": null
+                }}],
+                "returns": ["e"]
+            },
+            "parameters": { "from_id": from_id, "to_id": to_id },
+            "parameter_types": { "from_id": "I64", "to_id": "I64" }
+        });
+        self.send(body).await.map(|_| ())
+    }
+
+    /// Follow the `NEXT` edge(s) out of a memory: `g().n(id).out("NEXT")`.
+    pub async fn next_of(&self, id: i64) -> Result<Vec<MemoryRow>> {
+        let body = json!({
+            "request_type": "read",
+            "query_name": null,
+            "query": {
+                "queries": [{ "Query": {
+                    "name": "nxt",
+                    "steps": [
+                        { "N": { "Param": "id" } },
+                        { "Out": "NEXT" },
+                        { "ValueMap": ["$id", "role", "text", "ts"] }
+                    ],
+                    "condition": null
+                }}],
+                "returns": ["nxt"]
+            },
+            "parameters": { "id": id },
+            "parameter_types": { "id": "I64" }
+        });
+        let resp = self.send(body).await?;
+        let rows = resp["nxt"]["properties"].clone();
         Ok(serde_json::from_value(rows).unwrap_or_default())
     }
 

@@ -29,7 +29,13 @@ see [`scripts/gen_queries.mjs`](scripts/gen_queries.mjs). The operations used:
 | Create vector index | `CreateIndex { NodeVector }` (idempotent, on startup) |
 | Store a memory | `AddN("Memory", { role, text, embedding, ts })` |
 | Recall | `VectorSearchNodes("Memory", "embedding", q, k)` → `$distance` |
+| Chain turns (graph) | `n(from).addE("NEXT", to)` linking each turn to the next |
+| Walk a thread (graph) | `n(id).out("NEXT")` to follow the conversation chain |
 | Recent / count | `nWithLabel("Memory").orderBy(ts).limit(k)` / `.count()` |
+
+So the same `Memory` nodes carry **both** a vector embedding (for semantic
+recall) and `NEXT` edges (for ordered conversation threads) — graph and vector
+in one store, which is HelixDB's whole pitch.
 
 Embeddings are a dependency-free hashing embedder (`src/embed.rs`) — good enough
 to demonstrate semantic recall without an embedding API. Swap it for a real one
@@ -54,6 +60,7 @@ export GROQ_API_KEY=gsk_...        # PowerShell: $env:GROQ_API_KEY="gsk_..."
 cargo run                 # interactive chat
 cargo run -- seed         # insert a few example memories
 cargo run -- ask "what language do I like?"
+cargo run -- thread 0     # walk the NEXT-edge conversation chain from memory #0
 ```
 
 Config via env: `HELIX_URL` (default `http://localhost:6969`),
