@@ -56,7 +56,7 @@ impl Agent {
         self.last_id = Some(bot_id);
 
         // Distil the user's message into knowledge-graph facts and store them
-        // as connected Entity/Statement nodes — the same HelixDB instance now
+        // as connected Entity/Statement nodes. The same HelixDB instance now
         // holds vectors, a conversation chain, AND a knowledge graph.
         for t in self.llm.extract_triples(user_msg).await {
             self.db.add_fact(&t.subject, &t.predicate, &t.object).await?;

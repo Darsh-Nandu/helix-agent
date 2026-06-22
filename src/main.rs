@@ -1,4 +1,4 @@
-//! helix-agent — a tiny AI agent with long-term memory backed by HelixDB.
+//! helix-agent: a tiny AI agent with long-term memory backed by HelixDB.
 //!
 //! Usage:
 //!   helix-agent            # interactive chat REPL (default)
@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
             let chain = agent.thread(start).await?;
             println!("conversation chain following NEXT edges from memory #{start}:");
             if chain.is_empty() {
-                println!("  (no outgoing edges — seed or chat first)");
+                println!("  (no outgoing edges; seed or chat first)");
             }
             for (i, (role, text)) in chain.iter().enumerate() {
                 let one_line = text.replace('\n', " ");
@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
             let facts = agent.facts(&name).await?;
             println!("knowledge-graph facts about '{name}':");
             if facts.is_empty() {
-                println!("  (none yet — chat or seed first, with GROQ_API_KEY set)");
+                println!("  (none yet; chat or seed first, with GROQ_API_KEY set)");
             }
             for f in &facts {
                 println!("  {name} --{}--> {}", f.predicate, f.object);
@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
 /// Interactive chat loop.
 async fn repl(agent: &mut Agent, online: bool, model: &str, base_url: &str) -> Result<()> {
     let count = agent.db().count_memories().await.unwrap_or(0);
-    println!("helix-agent — memory backed by HelixDB ({base_url})");
+    println!("helix-agent: memory backed by HelixDB ({base_url})");
     println!(
         "LLM: {}",
         if online {

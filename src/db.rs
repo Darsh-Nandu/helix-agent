@@ -67,7 +67,7 @@ impl HelixClient {
             .json(&body)
             .send()
             .await
-            .context("POST /v1/query failed — is the HelixDB dev instance running?")?;
+            .context("POST /v1/query failed; is the HelixDB dev instance running?")?;
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         if !status.is_success() {

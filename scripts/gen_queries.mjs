@@ -17,7 +17,7 @@ function show(name, json) {
   console.log(json);
 }
 
-// 1) add_memory — store a chat turn as a Memory node (embedding is a property)
+// 1) add_memory: store a chat turn as a Memory node (embedding is a property)
 const addParams = defineParams({
   role: param.string(),
   text: param.string(),
@@ -48,7 +48,7 @@ show(
   }),
 );
 
-// 2) search_memories — k-NN over embeddings
+// 2) search_memories: k-NN over embeddings
 const searchParams = defineParams({
   query_vector: param.array(param.f32()),
   k: param.i64(),
@@ -76,7 +76,7 @@ show(
   }),
 );
 
-// 3) recent_memories — newest-first by timestamp
+// 3) recent_memories: newest-first by timestamp
 const recentParams = defineParams({ k: param.i64() });
 const recentMemories = (p = recentParams) =>
   readBatch()

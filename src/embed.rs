@@ -11,7 +11,7 @@
 /// the vector index is created for it on first insert, so keep it stable.
 pub const DIM: usize = 256;
 
-/// FNV-1a 64-bit hash — small, fast, good enough for bucketing tokens.
+/// FNV-1a 64-bit hash: small, fast, good enough for bucketing tokens.
 fn fnv1a(bytes: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
     for &b in bytes {

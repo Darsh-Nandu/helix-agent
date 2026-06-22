@@ -185,7 +185,7 @@ fn parse_triples(content: &str) -> Vec<Triple> {
 /// reporting what was recalled, so the memory loop is visible offline.
 fn offline_reply(user_msg: &str, recalled: &[MemoryHit]) -> String {
     let mut out = format!(
-        "[offline mode — set GROQ_API_KEY for real replies]\nYou said: {user_msg}\n"
+        "[offline mode: set GROQ_API_KEY for real replies]\nYou said: {user_msg}\n"
     );
     if recalled.is_empty() {
         out.push_str("I have no related memories yet.");
